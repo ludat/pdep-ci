@@ -163,6 +163,8 @@ spec:
                   value: "{{steps.run-tests.outputs.parameters.result}}"
                 - name: description
                   value: "{{steps.run-tests.outputs.parameters.description}}"
+                - name: language
+                  value: "{{steps.detect-project-type.outputs.parameters.project-type}}"
 
     - name: run-tests
       inputs:
@@ -337,6 +339,7 @@ spec:
         parameters:
           - name: result
           - name: description
+          - name: language
       resource:
         action: patch
         mergeStrategy: json
@@ -350,6 +353,9 @@ spec:
           - op: replace
             path: /metadata/labels/ci.pdep.com.ar~1description
             value: "{{= sprig.trimAll("-", sprig.mustRegexReplaceAll("[^-0-9a-zA-Z._]+", inputs.parameters.description, "-")) }}"
+          - op: replace
+            path: /metadata/labels/ci.pdep.com.ar~1language
+            value: "{{inputs.parameters.language}}"
     - name: notify-result
       inputs:
         parameters:
