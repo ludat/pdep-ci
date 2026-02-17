@@ -139,8 +139,10 @@ spec:
                   value: pending
                 - name: description
                   value: "Corriendo..."
+        - - name: detect-project-type
+            template: detect-project-type
         - - name: run-tests
-            template: test-repo
+            template: "test-{{steps.detect-project-type.outputs.parameters.project-type}}"
         - - name: notify-result
             template: notify-result
             arguments:
@@ -158,7 +160,7 @@ spec:
                 - name: description
                   value: "{{steps.run-tests.outputs.parameters.description}}"
 
-    - name: test-repo
+    - name: test-wollok
       metadata:
         labels:
           ci.pdep.com.ar/restricted-network: "true"
@@ -233,6 +235,77 @@ spec:
               secretKeySecret:
                 name: s3-credentials
                 key: secretKey
+    - name: test-haskell
+      metadata:
+        labels:
+          ci.pdep.com.ar/restricted-network: "true"
+      inputs:
+        artifacts:
+          - name: source
+            path: /work
+            git:
+              repo: "https://github.com/{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}.git"
+              revision: "{{workflow.parameters.sha}}"
+              usernameSecret:
+                name: github-credentials
+                key: username
+              passwordSecret:
+                name: github-credentials
+                key: token
+      script:
+        image: ghcr.io/ludat/haskell-stack:latest
+        workingDir: /work
+        command: [sh]
+        source: |
+          set -euo pipefail
+          set -x
+          set +e
+          stack test --no-terminal 2>&1 | tee /tmp/test-output.txt
+          exit_code=$?
+          set -e
+          if [ "$exit_code" = 0 ]; then
+            tail -n 1 /tmp/test-output.txt > /tmp/test-description.txt
+            printf Success > /tmp/test-result
+          else
+            tail -n 1 /tmp/test-output.txt > /tmp/test-description.txt
+            printf Failure > /tmp/test-result
+          fi
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 500m
+          limits:
+            memory: 1Gi
+            cpu: 1000m
+      activeDeadlineSeconds: 300
+
+      outputs:
+        parameters:
+          - name: result
+            valueFrom:
+              path: /tmp/test-result
+          - name: description
+            valueFrom:
+              path: /tmp/test-description.txt
+        artifacts:
+          - name: test-output
+            path: /tmp/test-output.txt
+            archive:
+              # Avoid having tgz file.
+              none: {}
+
+            artifactGC:
+              strategy: Never
+            s3:
+              endpoint: d1cbde2e6f1d23fad5b7258966cbd548.r2.cloudflarestorage.com
+              bucket: pdep-results
+              key: "{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}/result-{{workflow.uid}}.txt"
+              accessKeySecret:
+                name: s3-credentials
+                key: accessKey
+              secretKeySecret:
+                name: s3-credentials
+                key: secretKey
     - name: label-self
       inputs:
         parameters:
@@ -275,6 +348,66 @@ spec:
                 - name: description
                   value: "{{inputs.parameters.description}}"
             when: "{{inputs.parameters.result}} != Success"
+    - name: detect-project-type
+      script:
+        image: python:3-alpine
+        command: [python]
+        source: |
+          import os, json, urllib.request, urllib.error
+
+          token = os.environ["GITHUB_TOKEN"]
+          base_url = (
+              "https://api.github.com/repos/"
+              "{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}"
+              "/contents"
+          )
+          ref = "{{workflow.parameters.sha}}"
+          headers = {
+              "Authorization": f"token {token}",
+              "Accept": "application/vnd.github.raw+json",
+          }
+
+          def file_exists(path):
+              url = f"{base_url}/{path}?ref={ref}"
+              req = urllib.request.Request(url, headers=headers)
+              try:
+                  urllib.request.urlopen(req)
+                  return True
+              except urllib.error.HTTPError:
+                  return False
+
+          def get_json(path):
+              url = f"{base_url}/{path}?ref={ref}"
+              req = urllib.request.Request(url, headers=headers)
+              try:
+                  return json.load(urllib.request.urlopen(req))
+              except (urllib.error.HTTPError, json.JSONDecodeError):
+                  return None
+
+          if file_exists("stack.yaml"):
+              project_type = "haskell"
+          elif (pkg := get_json("package.json")) and "wollokVersion" in pkg:
+              project_type = "wollok"
+          else:
+              raise RuntimeError("Could not detect project type")
+
+          with open("/tmp/project-type", "w") as f:
+              f.write(project_type)
+        env:
+          - name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-credentials
+                key: token
+        resources:
+          requests:
+            memory: 32Mi
+            cpu: 1m
+      outputs:
+        parameters:
+          - name: project-type
+            valueFrom:
+              path: /tmp/project-type
     - name: github-notifier
       inputs:
         parameters:
