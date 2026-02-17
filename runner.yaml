@@ -139,7 +139,7 @@ spec:
                   value: pending
                 - name: description
                   value: "Corriendo..."
-        - - name: detect-project-type
+          - name: detect-project-type
             template: detect-project-type
         - - name: run-tests
             template: run-tests
