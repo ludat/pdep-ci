@@ -142,7 +142,11 @@ spec:
         - - name: detect-project-type
             template: detect-project-type
         - - name: run-tests
-            template: "test-{{steps.detect-project-type.outputs.parameters.project-type}}"
+            template: run-tests
+            arguments:
+              parameters:
+                - name: project-type
+                  value: "{{steps.detect-project-type.outputs.parameters.project-type}}"
         - - name: notify-result
             template: notify-result
             arguments:
@@ -159,6 +163,28 @@ spec:
                   value: "{{steps.run-tests.outputs.parameters.result}}"
                 - name: description
                   value: "{{steps.run-tests.outputs.parameters.description}}"
+
+    - name: run-tests
+      inputs:
+        parameters:
+          - name: project-type
+      steps:
+        - - name: test-wollok
+            template: test-wollok
+            when: "{{inputs.parameters.project-type}} == wollok"
+          - name: test-haskell
+            template: test-haskell
+            when: "{{inputs.parameters.project-type}} == haskell"
+      outputs:
+        parameters:
+          - name: result
+            valueFrom:
+              expression: |
+                steps['test-wollok'].outputs.parameters.result || steps['test-haskell'].outputs.parameters.result
+          - name: description
+            valueFrom:
+              expression: |
+                steps['test-wollok'].outputs.parameters.description || steps['test-haskell'].outputs.parameters.description
 
     - name: test-wollok
       metadata:
