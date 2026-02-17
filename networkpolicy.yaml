@@ -1,0 +1,43 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: restrict-test-repo
+spec:
+  podSelector:
+    matchLabels:
+      ci.pdep.com.ar/restricted-network: "true"
+  policyTypes:
+    - Ingress
+    - Egress
+  # Disable all incomming connections
+  ingress: []
+  egress:
+    # Allow connection from out pod to dns resolver pod so that the pod can
+    # resolve dns queries.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow traffic to the outside world (no internal ip) but only for
+    # port 443 (https) to pull the repo from github.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+
+      ports:
+        - protocol: TCP
+          port: 443

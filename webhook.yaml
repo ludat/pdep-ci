@@ -1,0 +1,178 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trigger-webhook
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: trigger-webhook.service-account-token
+  annotations:
+    kubernetes.io/service-account.name: trigger-webhook
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: trigger-webhook-role
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workfloweventbindings"]
+    verbs: ["list"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflowtemplates"]
+    verbs: ["get"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows"]
+    verbs: ["create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: trigger-webhook-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: trigger-webhook-role
+subjects:
+  - kind: ServiceAccount
+    name: trigger-webhook
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pdep-ci-webhook
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: pdep-ci.webhook.ludat.io
+      http:
+        paths:
+          - path: /push
+            pathType: Exact
+            backend:
+              service:
+                name: github-webhook-eventsource-svc
+                port:
+                  number: 12000
+  tls:
+    - hosts:
+        - pdep-ci.webhook.ludat.io
+      secretName: pdep-ci-webhook-tls
+---
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: default
+spec:
+  nats:
+    native:
+      replicas: 3
+      auth: token
+---
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github-webhook
+spec:
+  service:
+    ports:
+      - name: pdep-ci
+        port: 12000
+        targetPort: 12000
+  github:
+    pdep-ci:
+      organizations:
+        - pdep-lunes-tarde
+      webhook:
+        endpoint: "/push"
+        port: "12000"
+        url: https://pdep-ci.webhook.ludat.io
+        method: "POST"
+      events:
+        - push
+
+      apiToken:
+        name: github-credentials
+        key: token
+
+      webhookSecret:
+        name: github-webhook-secret
+        key: secret
+      contentType: "json"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: pdep-ci-webhook
+spec:
+  template:
+    serviceAccountName: trigger-webhook
+  dependencies:
+    - name: github
+      eventSourceName: github-webhook
+      eventName: pdep-ci
+      filters:
+        data:
+          - path: "body.repository.name"
+            type: "string"
+            value:
+              - "[0-9]+-objetos-tp-.*"
+
+  triggers:
+    - template:
+        name: run-ci
+        argoWorkflow:
+          operation: submit
+          parameters:
+            - src:
+                dependencyName: github
+                dataTemplate: "{{ .Input.body.repository.owner.name }}"
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: github
+                dataTemplate: "{{ .Input.body.repository.name }}"
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: github
+                dataTemplate: "{{ .Input.body.head_commit.id }}"
+              dest: spec.arguments.parameters.2.value
+            - dest: metadata.annotations.workflows\.argoproj\.io/title
+              src:
+                dependencyName: github
+                dataTemplate: "{{ .Input.body.repository.full_name }}"
+            - dest: metadata.annotations.workflows\.argoproj\.io/description
+              src:
+                dependencyName: github
+                dataTemplate: "{{ .Input.body.head_commit.author.name }}: {{ .Input.body.head_commit.message }}"
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: run-ci-
+                annotations:
+                  workflows.argoproj.io/title: "REPLACEME"
+                  workflows.argoproj.io/description: "REPLACEME"
+              spec:
+                entrypoint: main
+                arguments:
+                  parameters:
+                    - name: repo-owner
+                      value: "REPLACEME"
+                    - name: repo-name
+                      value: "REPLACEME"
+                    - name: sha
+                      value: "REPLACEME"
+                workflowTemplateRef:
+                  name: test-repo
+
+    - template:
+        name: log
+        log:
+          intervalSeconds: 15

@@ -1,0 +1,316 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: runner
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: runner.service-account-token
+  annotations:
+    kubernetes.io/service-account.name: runner
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflow-role
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [workflowtaskresults]
+    verbs: [create, patch]
+
+  - apiGroups: [argoproj.io]
+    resources: [workflowartifactgctasks]
+    verbs: [list]
+
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - runner.service-account-token
+      - github-credentials
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: runner-workflow-role
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workflow-role
+subjects:
+  - kind: ServiceAccount
+    name: runner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflow-patch-role
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [workflows]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-patch-role
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workflow-patch-role
+subjects:
+  - kind: ServiceAccount
+    name: runner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: artifactgc
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [workflowartifactgctasks]
+    verbs: [list, watch]
+  - apiGroups: [argoproj.io]
+    resources: [workflowartifactgctasks/status]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: runner-artifactgc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: artifactgc
+subjects:
+  - kind: ServiceAccount
+    name: runner
+---
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: test-repo
+spec:
+  entrypoint: main
+  executor:
+    serviceAccountName: runner
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+
+  artifactGC:
+    strategy: OnWorkflowDeletion
+    serviceAccountName: runner
+  # ttlStrategy:
+  #   secondsAfterCompletion: 604800
+  podGC:
+    strategy: OnWorkflowSuccess
+    deleteDelayDuration: "1h"
+
+  arguments:
+    parameters:
+      - name: repo-owner
+        value: "" # e.g. myorg
+      - name: repo-name
+        value: "" # e.g. myrepo
+      - name: sha
+        value: "" # e.g. commit SHA or branch name
+
+  workflowMetadata:
+    labelsFrom:
+      ci.pdep.com.ar/repo-owner:
+        expression: workflow.parameters["repo-owner"]
+      ci.pdep.com.ar/repo-name:
+        expression: workflow.parameters["repo-name"]
+      ci.pdep.com.ar/sha:
+        expression: workflow.parameters.sha
+  templates:
+    - name: main
+      steps:
+        - - name: notify-pending
+            template: github-notifier
+            arguments:
+              parameters:
+                - name: state
+                  value: pending
+                - name: description
+                  value: "Corriendo..."
+        - - name: run-tests
+            template: test-repo
+        - - name: notify-result
+            template: notify-result
+            arguments:
+              parameters:
+                - name: result
+                  value: "{{steps.run-tests.outputs.parameters.result}}"
+                - name: description
+                  value: "{{steps.run-tests.outputs.parameters.description}}"
+          - name: label-self
+            template: label-self
+            arguments:
+              parameters:
+                - name: result
+                  value: "{{steps.run-tests.outputs.parameters.result}}"
+                - name: description
+                  value: "{{steps.run-tests.outputs.parameters.description}}"
+
+    - name: test-repo
+      metadata:
+        labels:
+          ci.pdep.com.ar/restricted-network: "true"
+      inputs:
+        artifacts:
+          - name: source
+            path: /work
+            git:
+              repo: "https://github.com/{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}.git"
+              revision: "{{workflow.parameters.sha}}"
+              usernameSecret:
+                name: github-credentials
+                key: username
+              passwordSecret:
+                name: github-credentials
+                key: token
+      script:
+        image: ghcr.io/ludat/wollok-ts-cli:0.0.5@sha256:7bb5c03c78a3e7b16f3dbd01f56db4c110b3700e7ef6a2219388ab5ecc3c5988
+        workingDir: /work
+        command: [sh]
+        source: |
+          set -euo pipefail
+          set -x
+          id
+          set +e
+          wollok test >& /tmp/test-output.txt
+          exit_code=$?
+          set -e
+          if [[ "$exit_code" = 0 ]]; then
+            cat /tmp/test-output.txt | grep passed | tail -n 1 > /tmp/test-description.txt
+            printf Success > /tmp/test-result
+          elif [[ "$exit_code" = 2 ]]; then
+            cat /tmp/test-output.txt | grep -e failed -e errored | tail -n 1 > /tmp/test-description.txt
+            printf Failure > /tmp/test-result
+          else
+            printf "Error inesperado" > /tmp/test-description.txt
+            printf Failure > /tmp/test-result
+          fi
+        resources:
+          requests:
+            memory: 150Mi
+            cpu: 100m
+          limits:
+            memory: 256Mi
+            cpu: 600m
+      activeDeadlineSeconds: 90
+
+      outputs:
+        parameters:
+          - name: result
+            valueFrom:
+              path: /tmp/test-result
+          - name: description
+            valueFrom:
+              path: /tmp/test-description.txt
+        artifacts:
+          - name: test-output
+            path: /tmp/test-output.txt
+            archive:
+              # Avoid having tgz file.
+              none: {}
+
+            artifactGC:
+              strategy: Never
+            s3:
+              endpoint: d1cbde2e6f1d23fad5b7258966cbd548.r2.cloudflarestorage.com
+              bucket: pdep-results
+              key: "{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}/result-{{workflow.uid}}.txt"
+              accessKeySecret:
+                name: s3-credentials
+                key: accessKey
+              secretKeySecret:
+                name: s3-credentials
+                key: secretKey
+    - name: label-self
+      inputs:
+        parameters:
+          - name: result
+          - name: description
+      resource:
+        action: patch
+        mergeStrategy: json
+        flags:
+          - workflow
+          - "{{workflow.name}}"
+        manifest: |
+          - op: replace
+            path: /metadata/labels/ci.pdep.com.ar~1result
+            value: "{{inputs.parameters.result}}"
+          - op: replace
+            path: /metadata/labels/ci.pdep.com.ar~1description
+            value: "{{= sprig.trimAll("-", sprig.mustRegexReplaceAll("[^-0-9a-zA-Z._]+", inputs.parameters.description, "-")) }}"
+    - name: notify-result
+      inputs:
+        parameters:
+          - name: result
+          - name: description
+      steps:
+        - - name: notify-success
+            template: github-notifier
+            arguments:
+              parameters:
+                - name: state
+                  value: success
+                - name: description
+                  value: "{{inputs.parameters.description}}"
+            when: "{{inputs.parameters.result}} == Success"
+          - name: notify-failure
+            template: github-notifier
+            arguments:
+              parameters:
+                - name: state
+                  value: failure
+                - name: description
+                  value: "{{inputs.parameters.description}}"
+            when: "{{inputs.parameters.result}} != Success"
+    - name: github-notifier
+      inputs:
+        parameters:
+          - name: state
+          - name: target_url
+            value: "https://pdep-results.ludat.io/{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}/result-{{workflow.uid}}.txt"
+          - name: description
+          - name: context
+            value: "Tests"
+          # - name: organisation
+          # - name: app_repo
+          # - name: git_sha
+      container:
+        image: ghcr.io/crumbhole/ci-github-notifier:stable@sha256:0ac784074f6e37b768cba81ccdf43099cd6cd8472e9ed6d449625f86c3ed4a03
+        imagePullPolicy: Always
+        env:
+          - name: state
+            value: "{{inputs.parameters.state}}"
+          - name: target_url
+            value: "{{inputs.parameters.target_url}}"
+          - name: description
+            value: "{{inputs.parameters.description}}"
+          - name: context
+            value: "{{inputs.parameters.context}}"
+          - name: organisation
+            value: "{{workflow.parameters.repo-owner}}"
+          - name: app_repo
+            value: "{{workflow.parameters.repo-name}}"
+          - name: git_sha
+            value: "{{workflow.parameters.sha}}"
+          - name: access_token
+            valueFrom:
+              secretKeyRef:
+                name: github-credentials
+                key: token
+        resources:
+          requests:
+            memory: 8Mi
+            cpu: 1m
