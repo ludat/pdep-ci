@@ -180,11 +180,11 @@ spec:
           - name: result
             valueFrom:
               expression: |
-                steps['test-wollok'].outputs.parameters.result || steps['test-haskell'].outputs.parameters.result
+                steps['test-wollok'].outputs.parameters.result ?? steps['test-haskell'].outputs.parameters.result
           - name: description
             valueFrom:
               expression: |
-                steps['test-wollok'].outputs.parameters.description || steps['test-haskell'].outputs.parameters.description
+                steps['test-wollok'].outputs.parameters.description ?? steps['test-haskell'].outputs.parameters.description
 
     - name: test-wollok
       metadata:
