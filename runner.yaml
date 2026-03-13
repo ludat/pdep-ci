@@ -281,7 +281,7 @@ spec:
                 name: github-credentials
                 key: token
       script:
-        image: ghcr.io/ludat/haskell-stack:latest
+        image: haskell:9.6.6
         workingDir: /work
         command: [sh]
         source: |
