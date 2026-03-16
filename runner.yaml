@@ -182,11 +182,11 @@ spec:
           - name: result
             valueFrom:
               expression: |
-                steps['test-wollok'].outputs.parameters.result ?? steps['test-haskell'].outputs.parameters.result
+                inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.result : steps['test-haskell'].outputs.parameters.result
           - name: description
             valueFrom:
               expression: |
-                steps['test-wollok'].outputs.parameters.description ?? steps['test-haskell'].outputs.parameters.description
+                inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.description : steps['test-haskell'].outputs.parameters.description
 
     - name: test-wollok
       metadata:
@@ -283,7 +283,7 @@ spec:
       script:
         image: haskell:9.6.6
         workingDir: /work
-        command: [sh]
+        command: [bash]
         source: |
           set -euo pipefail
           set -x
