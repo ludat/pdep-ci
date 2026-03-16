@@ -1,6 +1,18 @@
 FROM haskell:9.10.3
 
-ADD https://raw.githubusercontent.com/uqbar-project/pdepreludat/refs/heads/master/stack.yaml.lock \
+ENV STACK_ROOT=/stack
+
+RUN mkdir -p /stack /work /home/runner && \
+    chown 1001:1001 /stack /work /home/runner
+
+ENV HOME=/home/runner
+
+USER 1001
+
+WORKDIR /work
+
+ADD --chown=1001:1001 \
+    https://raw.githubusercontent.com/uqbar-project/pdepreludat/refs/heads/master/stack.yaml.lock \
     https://raw.githubusercontent.com/uqbar-project/pdepreludat/refs/heads/master/package.yaml \
     https://raw.githubusercontent.com/uqbar-project/pdepreludat/refs/heads/master/stack.yaml \
     .

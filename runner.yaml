@@ -281,14 +281,15 @@ spec:
                 name: github-credentials
                 key: token
       script:
-        image: haskell:9.6.6
+        image: ghcr.io/ludat/pdep-ci/haskell:latest
         workingDir: /work
         command: [bash]
         source: |
           set -euo pipefail
           set -x
+          id
           set +e
-          stack test --no-terminal 2>&1 | tee /tmp/test-output.txt
+          stack test --no-install-ghc --no-terminal 2>&1 | tee /tmp/test-output.txt
           exit_code=$?
           set -e
           if [ "$exit_code" = 0 ]; then
