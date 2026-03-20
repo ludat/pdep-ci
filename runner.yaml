@@ -293,10 +293,10 @@ spec:
           exit_code=$?
           set -e
           if [ "$exit_code" = 0 ]; then
-            tail -n 1 /tmp/test-output.txt > /tmp/test-description.txt
+            grep example /tmp/test-output.txt | head -n 1 > /tmp/test-description.txt
             printf Success > /tmp/test-result
           else
-            tail -n 1 /tmp/test-output.txt > /tmp/test-description.txt
+            grep example /tmp/test-output.txt | head -n 1 > /tmp/test-description.txt
             printf Failure > /tmp/test-result
           fi
         resources:
