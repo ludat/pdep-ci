@@ -455,7 +455,6 @@ spec:
           # - name: git_sha
       container:
         image: ghcr.io/crumbhole/ci-github-notifier:stable@sha256:0ac784074f6e37b768cba81ccdf43099cd6cd8472e9ed6d449625f86c3ed4a03
-        imagePullPolicy: Always
         env:
           - name: state
             value: "{{inputs.parameters.state}}"
