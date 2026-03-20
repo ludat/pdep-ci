@@ -282,6 +282,7 @@ spec:
                 key: token
       script:
         image: ghcr.io/ludat/pdep-ci/haskell:latest
+        imagePullPolicy: Always
         workingDir: /work
         command: [bash]
         source: |
