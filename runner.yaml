@@ -290,7 +290,7 @@ spec:
           set -x
           id
           set +e
-          stack test --no-install-ghc --no-terminal 2>&1 | tee /tmp/test-output.txt
+          stack test --no-install-ghc --system-ghc --no-terminal 2>&1 | tee /tmp/test-output.txt
           exit_code=$?
           set -e
           if [ "$exit_code" = 0 ]; then
