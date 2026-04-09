@@ -290,6 +290,15 @@ spec:
           set -x
           id
           set +e
+          stack build --test --no-run-tests --no-install-ghc --system-ghc --no-terminal 2>&1 | tee /tmp/test-output.txt
+          build_exit_code=$?
+          set -e
+          if [ "$build_exit_code" != 0 ]; then
+            printf "Error de compilacion" > /tmp/test-description.txt
+            printf Failure > /tmp/test-result
+            exit 0
+          fi
+          set +e
           stack test --no-install-ghc --system-ghc --no-terminal 2>&1 | tee /tmp/test-output.txt
           exit_code=$?
           set -e
