@@ -143,6 +143,14 @@ spec:
                 dependencyName: github
                 dataTemplate: "{{ .Input.body.head_commit.id }}"
               dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: github
+                dataTemplate: "{{ .Input.body.pusher.email }}"
+              dest: spec.arguments.parameters.3.value
+            - src:
+                dependencyName: github
+                dataTemplate: "{{ .Input.body.pusher.name }}"
+              dest: spec.arguments.parameters.4.value
             - dest: metadata.annotations.workflows\.argoproj\.io/title
               src:
                 dependencyName: github
@@ -169,6 +177,10 @@ spec:
                     - name: repo-name
                       value: "REPLACEME"
                     - name: sha
+                      value: "REPLACEME"
+                    - name: pusher-email
+                      value: "REPLACEME"
+                    - name: pusher-name
                       value: "REPLACEME"
                 workflowTemplateRef:
                   name: test-repo

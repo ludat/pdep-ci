@@ -31,6 +31,7 @@ rules:
     resourceNames:
       - runner.service-account-token
       - github-credentials
+      - email-credentials
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -391,6 +392,15 @@ spec:
                 - name: description
                   value: "{{inputs.parameters.description}}"
             when: "{{inputs.parameters.result}} != Success"
+          - name: send-failure-email
+            template: send-failure-email
+            arguments:
+              parameters:
+                - name: result
+                  value: "{{inputs.parameters.result}}"
+                - name: description
+                  value: "{{inputs.parameters.description}}"
+            when: "{{inputs.parameters.result}} != Success"
     - name: detect-project-type
       script:
         image: python:3-alpine
@@ -451,6 +461,143 @@ spec:
           - name: project-type
             valueFrom:
               path: /tmp/project-type
+    - name: send-failure-email
+      inputs:
+        parameters:
+          - name: result
+          - name: description
+      script:
+        image: python:3-alpine
+        command: [python]
+        source: |
+          import os, smtplib, html
+          from email.message import EmailMessage
+
+          pusher_email = "{{workflow.parameters.pusher-email}}"
+          pusher_name = "{{workflow.parameters.pusher-name}}"
+          repo_owner = "{{workflow.parameters.repo-owner}}"
+          repo_name = "{{workflow.parameters.repo-name}}"
+          sha = "{{workflow.parameters.sha}}"
+          result = "{{inputs.parameters.result}}"
+          description = "{{inputs.parameters.description}}"
+          results_url = "https://pdep-results.ludat.io/{}/{}/result-{}.txt".format(
+              repo_owner, repo_name, "{{workflow.uid}}"
+          )
+          repo_url = "https://github.com/{}/{}".format(repo_owner, repo_name)
+          commit_url = "{}/commit/{}".format(repo_url, sha)
+
+          if not pusher_email:
+              print("No pusher email available, skipping notification")
+              exit(0)
+
+          e = html.escape
+          short_sha = sha[:7]
+
+          body_html = """\
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #24292e; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="border-left: 4px solid #cb2431; padding: 16px 20px; background: #ffeef0; border-radius: 4px; margin-bottom: 20px;">
+              <h2 style="margin: 0 0 4px 0; font-size: 18px; color: #cb2431;">Tests fallidos</h2>
+              <p style="margin: 0; color: #586069; font-size: 14px;">{repo_owner}/{repo_name}</p>
+            </div>
+
+            <p style="font-size: 15px;">Hola <strong>{pusher_name}</strong>,</p>
+            <p style="font-size: 15px;">Los tests de tu ultimo push fallaron.</p>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600; width: 120px;">Repositorio</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;"><a href="{repo_url}" style="color: #0366d6; text-decoration: none;">{repo_owner}/{repo_name}</a></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600;">Commit</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;"><a href="{commit_url}" style="color: #0366d6; text-decoration: none; font-family: monospace;">{short_sha}</a></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600;">Resultado</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;"><span style="color: #cb2431; font-weight: 600;">{result}</span></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600;">Descripcion</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;">{description}</td>
+              </tr>
+            </table>
+
+            <div style="text-align: center; margin: 24px 0;">
+              <a href="{results_url}" style="display: inline-block; padding: 10px 24px; background: #0366d6; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 600;">Ver resultados completos</a>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #e1e4e8; margin: 24px 0;">
+            <p style="font-size: 12px; color: #586069; text-align: center;">Este mail fue enviado automaticamente por pdep-ci.</p>
+          </body>
+          </html>
+          """.format(
+              repo_owner=e(repo_owner),
+              repo_name=e(repo_name),
+              pusher_name=e(pusher_name),
+              repo_url=e(repo_url),
+              commit_url=e(commit_url),
+              short_sha=e(short_sha),
+              result=e(result),
+              description=e(description),
+              results_url=e(results_url),
+          )
+
+          msg = EmailMessage()
+          msg["Subject"] = "Tests fallidos en {}/{}".format(repo_owner, repo_name)
+          msg["From"] = os.environ["SMTP_FROM"]
+          msg["To"] = pusher_email
+          msg.set_content(
+              "Hola {},\n\n"
+              "Los tests de {}/{} fallaron.\n\n"
+              "Commit: {}\n"
+              "Resultado: {}\n"
+              "Descripcion: {}\n\n"
+              "Resultados: {}\n".format(
+                  pusher_name, repo_owner, repo_name,
+                  sha, result, description, results_url
+              )
+          )
+          msg.add_alternative(body_html, subtype="html")
+
+          with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ["SMTP_PORT"])) as server:
+              server.starttls()
+              server.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+              server.send_message(msg)
+
+          print("Email sent to " + pusher_email)
+        env:
+          - name: SMTP_HOST
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: host
+          - name: SMTP_PORT
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: port
+          - name: SMTP_USER
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: user
+          - name: SMTP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: password
+          - name: SMTP_FROM
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: from
+        resources:
+          requests:
+            memory: 32Mi
+            cpu: 1m
     - name: github-notifier
       inputs:
         parameters:
