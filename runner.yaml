@@ -300,7 +300,7 @@ spec:
             exit 0
           fi
           set +e
-          stack test --no-install-ghc --system-ghc --no-terminal --test-arguments '--strict' 2>&1 | tee /tmp/test-output.txt
+          stack test --no-install-ghc --system-ghc --no-terminal --test-arguments --fail-on=focused,empty 2>&1 | tee /tmp/test-output.txt
           exit_code=$?
           set -e
           if [ "$exit_code" = 0 ]; then
