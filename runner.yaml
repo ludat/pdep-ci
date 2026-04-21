@@ -490,6 +490,10 @@ spec:
               print("No pusher email available, skipping notification")
               exit(0)
 
+          if "noreply" in pusher_email.lower():
+              print("Noreply address, skipping notification: " + pusher_email)
+              exit(0)
+
           e = html.escape
           short_sha = sha[:7]
 
