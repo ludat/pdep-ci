@@ -549,6 +549,7 @@ spec:
           msg["Subject"] = "Tests fallidos en {}/{}".format(repo_owner, repo_name)
           msg["From"] = os.environ["SMTP_FROM"]
           msg["To"] = pusher_email
+          msg["X-Mailin-Tag"] = "pdep-ci"
           msg.set_content(
               "Hola {},\n\n"
               "Los tests de {}/{} fallaron.\n\n"
