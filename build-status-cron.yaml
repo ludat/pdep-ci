@@ -3,7 +3,8 @@ kind: CronWorkflow
 metadata:
   name: build-status
 spec:
-  schedule: "0 * * * *"
+  schedules:
+    - "0 * * * *"
   concurrencyPolicy: Replace
   workflowSpec:
     entrypoint: main
