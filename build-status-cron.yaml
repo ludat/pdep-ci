@@ -7,7 +7,7 @@ spec:
     - "0 * * * *"
   concurrencyPolicy: Replace
   workflowSpec:
-    entrypoint: main
+    entrypoint: generate-status
     executor:
       serviceAccountName: runner
     automountServiceAccountToken: false
