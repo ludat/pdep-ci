@@ -69,7 +69,7 @@ spec:
               s3:
                 endpoint: d1cbde2e6f1d23fad5b7258966cbd548.r2.cloudflarestorage.com
                 bucket: pdep-results
-                key: build-status.csv
+                key: pdep-lunes-tarde/build-status.csv
                 accessKeySecret:
                   name: s3-credentials
                   key: accessKey
