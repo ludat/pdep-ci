@@ -15,6 +15,8 @@
         buildInputs = with pkgs; [
           nodejs
           pnpm
+          nushell
+          gh
         ];
       };
     }

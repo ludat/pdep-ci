@@ -1,0 +1,77 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: build-status
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Replace
+  workflowSpec:
+    entrypoint: main
+    executor:
+      serviceAccountName: runner
+    automountServiceAccountToken: false
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1001
+    podGC:
+      strategy: OnWorkflowSuccess
+      deleteDelayDuration: "1h"
+    templates:
+      - name: generate-status
+        script:
+          image: ghcr.io/nushell/nushell:latest
+          command: [nu]
+          source: |
+            let token = $env.GITHUB_TOKEN
+            let headers = { Authorization: $"Bearer ($token)" }
+            let org = "pdep-lunes-tarde"
+            let prefix = "2026-funcional-tp-"
+
+            # Fetch all repos with pagination
+            let repos = (mut repos = []; mut page = 1; loop {
+                let batch = (http get --headers $headers $"https://api.github.com/orgs/($org)/repos?per_page=100&page=($page)")
+                $repos = ($repos | append ($batch | where ($it.name | str starts-with $prefix) | get name))
+                if ($batch | length) < 100 { break }
+                $page = $page + 1
+            }; $repos)
+
+            $repos
+            | par-each --threads 16 {|repo|
+                let status = (try {
+                    http get --headers $headers $"https://api.github.com/repos/($org)/($repo)/commits/main/status"
+                    | get state
+                } catch { "no runs" })
+                { repo: $repo, status: $status }
+            }
+            | sort-by repo
+            | to csv
+            | save -f /tmp/build-status.csv
+          env:
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-credentials
+                  key: token
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 10m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+        outputs:
+          artifacts:
+            - name: build-status
+              path: /tmp/build-status.csv
+              archive:
+                none: {}
+              s3:
+                endpoint: d1cbde2e6f1d23fad5b7258966cbd548.r2.cloudflarestorage.com
+                bucket: pdep-results
+                key: build-status.csv
+                accessKeySecret:
+                  name: s3-credentials
+                  key: accessKey
+                secretKeySecret:
+                  name: s3-credentials
+                  key: secretKey
