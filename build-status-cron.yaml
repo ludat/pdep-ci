@@ -42,7 +42,8 @@ spec:
                 if $resp.total_count == 0 {
                     null
                 } else {
-                    { repo: $repo, status: $resp.state }
+                    let description = ($resp.statuses | where context == "Tests" | get 0.description)
+                    { repo: $repo, status: $resp.state, description: $description }
                 }
             }
             | compact
