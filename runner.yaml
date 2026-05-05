@@ -111,7 +111,7 @@ spec:
     secondsAfterFailure: 2592000
   podGC:
     strategy: OnWorkflowSuccess
-    deleteDelayDuration: "1h"
+    deleteDelayDuration: "1200s"
 
   arguments:
     parameters:
