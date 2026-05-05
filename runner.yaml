@@ -106,8 +106,9 @@ spec:
   artifactGC:
     strategy: OnWorkflowDeletion
     serviceAccountName: runner
-  # ttlStrategy:
-  #   secondsAfterCompletion: 604800
+  ttlStrategy:
+    secondsAfterCompletion: 86400
+    secondsAfterFailure: 2592000
   podGC:
     strategy: OnWorkflowSuccess
     deleteDelayDuration: "1h"
