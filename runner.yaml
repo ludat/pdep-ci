@@ -179,16 +179,23 @@ spec:
           - name: test-haskell
             template: test-haskell
             when: "{{inputs.parameters.project-type}} == haskell"
+          - name: test-logico
+            template: test-logico
+            when: "{{inputs.parameters.project-type}} == logico"
       outputs:
         parameters:
           - name: result
             valueFrom:
               expression: |
-                inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.result : steps['test-haskell'].outputs.parameters.result
+                inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.result :
+                inputs.parameters['project-type'] == 'haskell' ? steps['test-haskell'].outputs.parameters.result :
+                steps['test-logico'].outputs.parameters.result
           - name: description
             valueFrom:
               expression: |
-                inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.description : steps['test-haskell'].outputs.parameters.description
+                inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.description :
+                inputs.parameters['project-type'] == 'haskell' ? steps['test-haskell'].outputs.parameters.description :
+                steps['test-logico'].outputs.parameters.description
 
     - name: test-wollok
       metadata:
@@ -347,6 +354,80 @@ spec:
               secretKeySecret:
                 name: s3-credentials
                 key: secretKey
+    - name: test-logico
+      metadata:
+        labels:
+          ci.pdep.com.ar/restricted-network: "true"
+      inputs:
+        artifacts:
+          - name: source
+            path: /work
+            git:
+              repo: "https://github.com/{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}.git"
+              revision: "{{workflow.parameters.sha}}"
+              usernameSecret:
+                name: github-credentials
+                key: username
+              passwordSecret:
+                name: github-credentials
+                key: token
+      script:
+        image: swipl:10.0.2
+        workingDir: /work
+        command: [bash]
+        source: |
+          set -euo pipefail
+          set -x
+          id
+          set +e
+          swipl -g run_tests -t halt src/tp.pl 2>&1 | tee /tmp/test-output.txt
+          exit_code=$?
+          set -e
+          # plunit prints summary lines like "% All 4 tests passed" or "% 1 test failed".
+          description=$(grep -i -e "tests* passed" -e "tests* failed" /tmp/test-output.txt | tail -n 1 | sed 's/^[%[:space:]]*//')
+          if [ "$exit_code" = 0 ]; then
+            printf '%s' "${description:-Tests passed}" > /tmp/test-description.txt
+            printf Success > /tmp/test-result
+          else
+            printf '%s' "${description:-Error inesperado}" > /tmp/test-description.txt
+            printf Failure > /tmp/test-result
+          fi
+        resources:
+          requests:
+            memory: 150Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 600m
+      activeDeadlineSeconds: 120
+
+      outputs:
+        parameters:
+          - name: result
+            valueFrom:
+              path: /tmp/test-result
+          - name: description
+            valueFrom:
+              path: /tmp/test-description.txt
+        artifacts:
+          - name: test-output
+            path: /tmp/test-output.txt
+            archive:
+              # Avoid having tgz file.
+              none: {}
+
+            artifactGC:
+              strategy: Never
+            s3:
+              endpoint: d1cbde2e6f1d23fad5b7258966cbd548.r2.cloudflarestorage.com
+              bucket: pdep-results
+              key: "{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}/result-{{workflow.uid}}.txt"
+              accessKeySecret:
+                name: s3-credentials
+                key: accessKey
+              secretKeySecret:
+                name: s3-credentials
+                key: secretKey
     - name: label-self
       inputs:
         parameters:
@@ -442,6 +523,8 @@ spec:
               project_type = "haskell"
           elif (pkg := get_json("package.json")) and "wollokVersion" in pkg:
               project_type = "wollok"
+          elif file_exists("src/tp.pl"):
+              project_type = "logico"
           else:
               raise RuntimeError("Could not detect project type")
 
