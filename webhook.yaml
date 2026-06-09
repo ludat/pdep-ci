@@ -124,6 +124,7 @@ spec:
             value:
               - "[0-9]+-objetos-tp-.*"
               - "[0-9]+-funcional-tp-.*"
+              - "[0-9]+-logico-tp-.*"
 
   triggers:
     - template:
