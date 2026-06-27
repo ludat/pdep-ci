@@ -26,12 +26,12 @@ spec:
             let token = $env.GITHUB_TOKEN
             let headers = { Authorization: $"Bearer ($token)" }
             let org = "pdep-lunes-tarde"
-            let prefix = "2026-funcional-tp-"
+            let pattern = '^2026-(objetos|funcional|logico)-tp-.*'
 
             # Fetch all repos with pagination
             let repos = (mut repos = []; mut page = 1; loop {
                 let batch = (http get --headers $headers $"https://api.github.com/orgs/($org)/repos?per_page=100&page=($page)")
-                $repos = ($repos | append ($batch | where ($it.name | str starts-with $prefix) | get name))
+                $repos = ($repos | append ($batch | where ($it.name =~ $pattern) | get name))
                 if ($batch | length) < 100 { break }
                 $page = $page + 1
             }; $repos)
