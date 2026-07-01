@@ -121,6 +121,10 @@ spec:
         value: "" # e.g. myrepo
       - name: sha
         value: "" # e.g. commit SHA or branch name
+      - name: pusher-email
+        value: "" # someemail@example.com
+      - name: pusher-name
+        value: "" # Ludat
 
   workflowMetadata:
     labelsFrom:
