@@ -383,13 +383,18 @@ spec:
           swipl -g run_tests -t halt src/tp.pl 2>&1 | tee /tmp/test-output.txt
           exit_code=$?
           set -e
-          # plunit prints summary lines like "% All 4 tests passed" or "% 1 test failed".
-          description=$(grep -i -e "tests* passed" -e "tests* failed" /tmp/test-output.txt | tail -n 1 | sed 's/^[%[:space:]]*//')
+          # plunit prints summary lines like "% All 4 tests passed" and "% 1 test failed".
+          passed=$(grep -oiE '[0-9]+ tests? passed' /tmp/test-output.txt | tail -n 1 | grep -oE '[0-9]+' || true)
+          failed=$(grep -oiE '[0-9]+ tests? failed' /tmp/test-output.txt | tail -n 1 | grep -oE '[0-9]+' || true)
+          if [ -n "$passed$failed" ]; then
+            description="${passed:-0} passed, ${failed:-0} failed"
+          else
+            description="Error inesperado"
+          fi
+          printf '%s' "$description" > /tmp/test-description.txt
           if [ "$exit_code" = 0 ]; then
-            printf '%s' "${description:-Tests passed}" > /tmp/test-description.txt
             printf Success > /tmp/test-result
           else
-            printf '%s' "${description:-Error inesperado}" > /tmp/test-description.txt
             printf Failure > /tmp/test-result
           fi
         resources:
