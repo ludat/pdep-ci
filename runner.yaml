@@ -491,7 +491,7 @@ spec:
                   value: "{{inputs.parameters.result}}"
                 - name: description
                   value: "{{inputs.parameters.description}}"
-            when: "{{inputs.parameters.result}} != Success"
+            when: "{{inputs.parameters.result}} != Success && '{{workflow.parameters.pusher-email}}' != ''"
     - name: detect-project-type
       script:
         image: python:3-alpine
