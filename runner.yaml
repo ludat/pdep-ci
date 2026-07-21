@@ -390,16 +390,21 @@ spec:
           # plunit prints summary lines like "% All 4 tests passed" and "% 1 test failed".
           passed=$(grep -oiE '[0-9]+ tests? passed' /tmp/test-output.txt | tail -n 1 | grep -oE '[0-9]+' || true)
           failed=$(grep -oiE '[0-9]+ tests? failed' /tmp/test-output.txt | tail -n 1 | grep -oE '[0-9]+' || true)
+          total=$(( ${passed:-0} + ${failed:-0} ))
           if [ -n "$passed$failed" ]; then
             description="${passed:-0} passed, ${failed:-0} failed"
           else
             description="Error inesperado"
           fi
-          printf '%s' "$description" > /tmp/test-description.txt
-          if [ "$exit_code" = 0 ]; then
-            printf Success > /tmp/test-result
-          else
+          if [ "$exit_code" != 0 ]; then
+            printf '%s' "$description" > /tmp/test-description.txt
             printf Failure > /tmp/test-result
+          elif [ "$total" = 0 ]; then
+            printf 'No se encontraron tests' > /tmp/test-description.txt
+            printf Failure > /tmp/test-result
+          else
+            printf '%s' "$description" > /tmp/test-description.txt
+            printf Success > /tmp/test-result
           fi
         resources:
           requests:
