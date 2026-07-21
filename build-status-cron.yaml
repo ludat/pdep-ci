@@ -19,6 +19,14 @@ spec:
       deleteDelayDuration: "1h"
     templates:
       - name: generate-status
+        # Github API is a bit unstable from time to time
+        retryStrategy:
+          limit: "3"
+          retryPolicy: OnFailure
+          backoff:
+            duration: "30s"
+            factor: "2"
+            maxDuration: "30m"
         script:
           image: ghcr.io/nushell/nushell:latest
           command: [nu]
