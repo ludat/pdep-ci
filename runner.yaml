@@ -136,8 +136,9 @@ spec:
         expression: workflow.parameters.sha
   templates:
     - name: main
-      steps:
-        - - name: notify-pending
+      dag:
+        tasks:
+          - name: notify-pending
             template: github-notifier
             arguments:
               parameters:
@@ -147,30 +148,33 @@ spec:
                   value: "Corriendo..."
           - name: detect-project-type
             template: detect-project-type
-        - - name: run-tests
+          - name: run-tests
             template: run-tests
+            depends: detect-project-type
             arguments:
               parameters:
                 - name: project-type
-                  value: "{{steps.detect-project-type.outputs.parameters.project-type}}"
-        - - name: notify-result
+                  value: "{{tasks.detect-project-type.outputs.parameters.project-type}}"
+          - name: notify-result
             template: notify-result
+            depends: "run-tests.Succeeded || run-tests.Failed || run-tests.Errored"
             arguments:
               parameters:
                 - name: result
-                  value: "{{steps.run-tests.outputs.parameters.result}}"
+                  value: "{{= sprig.dig('run-tests', 'outputs', 'parameters', 'result', 'Failure', tasks) }}"
                 - name: description
-                  value: "{{steps.run-tests.outputs.parameters.description}}"
+                  value: "{{= sprig.dig('run-tests', 'outputs', 'parameters', 'description', 'Error inesperado (probablemente sin memoria o timeout)', tasks) }}"
           - name: label-self
             template: label-self
+            depends: run-tests.Succeeded
             arguments:
               parameters:
                 - name: result
-                  value: "{{steps.run-tests.outputs.parameters.result}}"
+                  value: "{{tasks.run-tests.outputs.parameters.result}}"
                 - name: description
-                  value: "{{steps.run-tests.outputs.parameters.description}}"
+                  value: "{{tasks.run-tests.outputs.parameters.description}}"
                 - name: language
-                  value: "{{steps.detect-project-type.outputs.parameters.project-type}}"
+                  value: "{{tasks.detect-project-type.outputs.parameters.project-type}}"
 
     - name: run-tests
       inputs:
@@ -408,7 +412,6 @@ spec:
             exit 0
           fi
 
-          # 3. Number of failed tests (absent means none failed).
           if grep -qiE '[0-9]+ tests? failed' "$out"; then
             failed=$(grep -oiE '[0-9]+ tests? failed' "$out" | tail -n 1 | grep -oE '[0-9]+')
           elif grep -qiE '(^|[^0-9])test failed' "$out"; then
@@ -417,7 +420,6 @@ spec:
             failed=0
           fi
 
-          # 4. Report the counts and pick the result of the run.
           printf '%s' "$passed passed, $failed failed" > /tmp/test-description.txt
           if [ "$exit_code" != 0 ]; then
             printf Failure > /tmp/test-result
