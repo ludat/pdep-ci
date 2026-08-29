@@ -1,4 +1,4 @@
-FROM haskell:9.10.3
+FROM haskell:9.14.1
 
 ENV STACK_ROOT=/stack
 
