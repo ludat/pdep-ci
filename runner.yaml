@@ -223,7 +223,7 @@ spec:
                 name: github-credentials
                 key: token
       script:
-        image: ghcr.io/ludat/wollok-ts-cli:0.0.5@sha256:7bb5c03c78a3e7b16f3dbd01f56db4c110b3700e7ef6a2219388ab5ecc3c5988
+        image: ghcr.io/ludat/wollok-ts-cli:1.1.0
         workingDir: /work
         command: [sh]
         source: |
