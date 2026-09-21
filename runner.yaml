@@ -126,6 +126,16 @@ spec:
       - name: pusher-name
         value: "" # Ludat
 
+      - name: admin-alert-emails
+        value: "lucas6246@gmail.com,juan9794@gmail.com" # e.g. "docente1@example.com,docente2@example.com"
+      - name: argo-ui-url
+        value: "https://workflows.ludat.io"
+
+  hooks:
+    alert-on-error:
+      expression: workflow.status == "Failed" || workflow.status == "Error"
+      template: alert-on-error
+
   workflowMetadata:
     labelsFrom:
       ci.pdep.com.ar/repo-owner:
@@ -692,6 +702,152 @@ spec:
 
           print("Email sent to " + pusher_email)
         env:
+          - name: SMTP_HOST
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: host
+          - name: SMTP_PORT
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: port
+          - name: SMTP_USER
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: user
+          - name: SMTP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: password
+          - name: SMTP_FROM
+            valueFrom:
+              secretKeyRef:
+                name: email-credentials
+                key: from
+        resources:
+          requests:
+            memory: 32Mi
+            cpu: 1m
+    - name: alert-on-error
+      script:
+        image: python:3-alpine
+        command: [python]
+        source: |
+          import html, os, smtplib
+          from email.message import EmailMessage
+
+          recipients = [a.strip() for a in os.environ["ALERT_EMAILS"].split(",") if a.strip()]
+          if not recipients:
+              print("admin-alert-emails vacio, no se manda ninguna alerta")
+              raise SystemExit(0)
+
+          repo_owner = os.environ["REPO_OWNER"]
+          repo_name = os.environ["REPO_NAME"]
+          sha = os.environ["SHA"]
+          status = os.environ["WF_STATUS"]
+          wf_name = os.environ["WF_NAME"]
+          namespace = os.environ["WF_NAMESPACE"]
+          argo_ui = os.environ["ARGO_UI_URL"].rstrip("/")
+
+          job_url = "{}/workflows/{}/{}".format(argo_ui, namespace, wf_name)
+          repo_url = "https://github.com/{}/{}".format(repo_owner, repo_name)
+          commit_url = "{}/commit/{}".format(repo_url, sha)
+
+          e = html.escape
+          short_sha = sha[:7] if sha else "?"
+
+          body_html = """\
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #24292e; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="border-left: 4px solid #cb2431; padding: 16px 20px; background: #ffeef0; border-radius: 4px; margin-bottom: 20px;">
+              <h2 style="margin: 0 0 4px 0; font-size: 18px; color: #cb2431;">Error en el CI</h2>
+              <p style="margin: 0; color: #586069; font-size: 14px;">{repo_owner}/{repo_name}</p>
+            </div>
+
+            <p style="font-size: 15px;">El workflow termino en <strong>{status}</strong>. Esto no es un test en rojo: se rompio algo del pipeline.</p>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600; width: 120px;">Repositorio</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;"><a href="{repo_url}" style="color: #0366d6; text-decoration: none;">{repo_owner}/{repo_name}</a></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600;">Job</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;"><a href="{job_url}" style="color: #0366d6; text-decoration: none; font-family: monospace;">{wf_name}</a></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600;">Commit</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;"><a href="{commit_url}" style="color: #0366d6; text-decoration: none; font-family: monospace;">{short_sha}</a></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8; background: #f6f8fa; font-weight: 600;">Estado</td>
+                <td style="padding: 8px 12px; border: 1px solid #e1e4e8;"><span style="color: #cb2431; font-weight: 600;">{status}</span></td>
+              </tr>
+            </table>
+
+            <div style="text-align: center; margin: 24px 0;">
+              <a href="{job_url}" style="display: inline-block; padding: 10px 24px; background: #0366d6; color: #ffffff; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 600;">Ver el job en Argo</a>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #e1e4e8; margin: 24px 0;">
+            <p style="font-size: 12px; color: #586069; text-align: center;">Este mail fue enviado automaticamente por pdep-ci.</p>
+          </body>
+          </html>
+          """.format(
+              repo_owner=e(repo_owner),
+              repo_name=e(repo_name),
+              repo_url=e(repo_url),
+              job_url=e(job_url),
+              wf_name=e(wf_name),
+              commit_url=e(commit_url),
+              short_sha=e(short_sha),
+              status=e(status),
+          )
+
+          msg = EmailMessage()
+          msg["Subject"] = "Error en el CI de {}/{}".format(repo_owner, repo_name)
+          msg["From"] = os.environ["SMTP_FROM"]
+          msg["To"] = ", ".join(recipients)
+          msg["X-Mailin-Tag"] = "pdep-ci-alert"
+          msg.set_content(
+              "El workflow de {}/{} termino en {}.\n\n"
+              "Job: {}\n"
+              "Repo: {}\n"
+              "Commit: {}\n".format(
+                  repo_owner, repo_name, status,
+                  job_url, repo_url, commit_url
+              )
+          )
+          msg.add_alternative(body_html, subtype="html")
+
+          with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ["SMTP_PORT"])) as server:
+              server.starttls()
+              server.login(os.environ["SMTP_USER"], os.environ["SMTP_PASSWORD"])
+              server.send_message(msg)
+
+          print("Alerta enviada a " + ", ".join(recipients))
+        env:
+          - name: ALERT_EMAILS
+            value: "{{workflow.parameters.admin-alert-emails}}"
+          - name: ARGO_UI_URL
+            value: "{{workflow.parameters.argo-ui-url}}"
+          - name: REPO_OWNER
+            value: "{{workflow.parameters.repo-owner}}"
+          - name: REPO_NAME
+            value: "{{workflow.parameters.repo-name}}"
+          - name: SHA
+            value: "{{workflow.parameters.sha}}"
+          - name: WF_NAME
+            value: "{{workflow.name}}"
+          - name: WF_NAMESPACE
+            value: "{{workflow.namespace}}"
+          - name: WF_STATUS
+            value: "{{workflow.status}}"
           - name: SMTP_HOST
             valueFrom:
               secretKeyRef:
