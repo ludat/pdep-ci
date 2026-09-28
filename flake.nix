@@ -16,7 +16,10 @@
           nodejs
           pnpm
           nushell
+          argo-workflows
           gh
+          mcp-grafana
+          mcp-k8s-go
         ];
       };
     }
