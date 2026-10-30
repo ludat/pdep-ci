@@ -175,14 +175,13 @@ spec:
           - name: run-tests
             template: run-tests
             depends: detect-project-type
-            when: "{{tasks.detect-project-type.outputs.parameters.project-type}} != unknown"
             arguments:
               parameters:
                 - name: project-type
                   value: "{{tasks.detect-project-type.outputs.parameters.project-type}}"
           - name: notify-result
             template: notify-result
-            depends: "run-tests.Succeeded || run-tests.Failed || run-tests.Errored || run-tests.Skipped"
+            depends: "run-tests.Succeeded || run-tests.Failed || run-tests.Errored"
             arguments:
               parameters:
                 - name: result
@@ -190,13 +189,10 @@ spec:
                 - name: description
                   value: >-
                     {{= sprig.dig('run-tests', 'outputs', 'parameters', 'description',
-                    sprig.dig('detect-project-type', 'outputs', 'parameters', 'project-type', '', tasks) == 'unknown'
-                    ? 'No se pudo detectar el tipo de proyecto'
-                    : 'Error inesperado (probablemente sin memoria)',
-                    tasks) }}
+                    'Error inesperado (probablemente sin memoria)', tasks) }}
           - name: label-self
             template: label-self
-            depends: "run-tests.Succeeded || run-tests.Skipped"
+            depends: run-tests.Succeeded
             arguments:
               parameters:
                 - name: result
@@ -204,12 +200,13 @@ spec:
                 - name: description
                   value: >-
                     {{= sprig.dig('run-tests', 'outputs', 'parameters', 'description',
-                    sprig.dig('detect-project-type', 'outputs', 'parameters', 'project-type', '', tasks) == 'unknown'
-                    ? 'No se pudo detectar el tipo de proyecto'
-                    : 'Error inesperado (probablemente sin memoria)',
-                    tasks) }}
+                    'Error inesperado (probablemente sin memoria)', tasks) }}
                 - name: language
                   value: "{{= sprig.dig('detect-project-type', 'outputs', 'parameters', 'project-type', 'unknown', tasks) }}"
+          - name: fail-on-unknown
+            template: fail-on-unknown
+            depends: "notify-result && label-self"
+            when: "{{tasks.detect-project-type.outputs.parameters.project-type}} == unknown"
 
     - name: run-tests
       inputs:
@@ -230,12 +227,14 @@ spec:
           - name: result
             valueFrom:
               expression: |
+                inputs.parameters['project-type'] == 'unknown' ? 'Failure' :
                 inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.result :
                 inputs.parameters['project-type'] == 'haskell' ? steps['test-haskell'].outputs.parameters.result :
                 steps['test-logico'].outputs.parameters.result
           - name: description
             valueFrom:
               expression: |
+                inputs.parameters['project-type'] == 'unknown' ? 'No se pudo detectar el tipo de proyecto' :
                 inputs.parameters['project-type'] == 'wollok' ? steps['test-wollok'].outputs.parameters.description :
                 inputs.parameters['project-type'] == 'haskell' ? steps['test-haskell'].outputs.parameters.description :
                 steps['test-logico'].outputs.parameters.description
@@ -631,6 +630,19 @@ spec:
           - name: project-type
             valueFrom:
               path: /tmp/project-type
+    - name: fail-on-unknown
+      script:
+        image: python:3-alpine
+        command: [python]
+        source: |
+          import sys
+
+          # Ya se notifico a GitHub; fallamos para que salte alert-on-error.
+          sys.exit("No se pudo detectar el tipo de proyecto")
+        resources:
+          requests:
+            memory: 32Mi
+            cpu: 50m
     - name: send-failure-email
       inputs:
         parameters:
